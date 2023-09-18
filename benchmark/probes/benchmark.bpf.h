@@ -19,6 +19,7 @@
 #endif
 
 #define TRACEPOINT_SEC() SEC("tp_btf/sys_enter")
+#define RAW_TRACEPOINT_SEC() SEC("raw_tracepoint/sys_enter")
 
 #define BENCHMARK_PROBE(sec, impl)                                                                                     \
     sec() int probe()                                                                                                  \

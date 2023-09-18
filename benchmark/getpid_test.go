@@ -35,6 +35,10 @@ func BenchmarkGetpidTracepointWithSimpleMap(b *testing.B) {
 	benchmarkWithProbe(b, "probes/tracepoint-simple.bpf.o", true)
 }
 
+func BenchmarkGetpidRawTracepointWithSimpleMap(b *testing.B) {
+	benchmarkWithProbe(b, "probes/raw-tracepoint-simple.bpf.o", true)
+}
+
 func BenchmarkGetpidTracepointWithComplexMap(b *testing.B) {
 	benchmarkWithProbe(b, "probes/tracepoint-complex.bpf.o", true)
 }
