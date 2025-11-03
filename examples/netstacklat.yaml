@@ -37,6 +37,24 @@ metrics:
           size: 2
           decoders:
             - name: uint
+  counters:
+    - name: netstacklat_errors_total
+      help: Counter for bpf_core_read errors in code (can be disabled in code)
+      labels:
+        - name: type
+          size: 4
+          decoders:
+            - name: uint
+            - name: static_map
+              static_map:
+                0: unknown
+                1: err_sk_storage
+                2: err_read_tcp_rcv_wup
+                3: err_read_tcp_rcv_wnd
+                4: err_read_tcp_rcv_nxt
+                5: err_read_tcp_last_skb_cb
+                6: err_read_tcp_cp_seq
+                7: err_read_tcp_rcv_ooopack
 
 # Remember to update #define N_CGROUPS in code when adding more matches
 cgroup_id_map:

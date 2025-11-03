@@ -265,6 +265,57 @@ static void record_latency_since(ktime_t tstamp, const struct hist_key *key)
 }
 #endif /* !CONFIG_MAP_MACROS */
 
+/* Debug facility to count errors */
+#define MAX_ERROR_TYPES 8
+enum error_types {
+    ERR_UNKNOWN = 0,
+    ERR_sk_storage = 1,
+    ERR_READ_TCP_rcv_wup = 2,
+    ERR_READ_TCP_rcv_wnd = 3,
+    ERR_READ_TCP_rcv_nxt = 4,
+    ERR_READ_TCP_last_skb_cb = 5,
+    ERR_READ_TCP_cp_seq = 6,
+    ERR_READ_TCP_rcv_ooopack = 7,
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, MAX_ERROR_TYPES);
+    __type(key, u32);
+    __type(value, u64);
+} netstacklat_errors_total SEC(".maps");
+
+/* This provide easy way to disable debug feature for errors.
+ * Disabling this reduces BPF code size.
+ */
+#define CONFIG_TRACK_ERRORS 1
+/* #define CONFIG_PRINT_ERRORS 1 */
+#undef CONFIG_PRINT_ERRORS
+
+void record_errors(u32 err)
+{
+#ifdef CONFIG_TRACK_ERRORS
+    u32 key = ERR_UNKNOWN;
+
+    if (err < MAX_ERROR_TYPES)
+	    key = err;
+
+    increment_map_nosync(&netstacklat_errors_total, &key, 1);
+#endif /* CONFIG_TRACK_ERRORS */
+}
+
+#ifdef CONFIG_PRINT_ERRORS
+#define my_printk(fmt, ...) bpf_printk(fmt, ##__VA_ARGS__)
+#else /* !CONFIG_PRINT_ERRORS */
+#define my_printk(fmt, ...)
+#endif
+
+/* Debug macro that can be disabled compile time */
+#define dbg(__ERR_NR, fmt, ...)			\
+	({						\
+		record_errors(__ERR_NR);		\
+		my_printk(fmt, ##__VA_ARGS__);		\
+	})
+
 static inline bool filter_nth_packet(const enum netstacklat_hook hook)
 {
 	u32 key = hook;
@@ -516,13 +567,15 @@ static int get_current_rcv_wnd_seq(struct tcp_sock *tp, u32 rcv_nxt, u32 *seq)
 
 	err = bpf_core_read(&rcv_wup, sizeof(rcv_wup), &tp->rcv_wup);
 	if (err) {
-		bpf_printk("failed to read tcp_sock->rcv_wup, err=%d", err);
+		dbg(ERR_READ_TCP_rcv_wup,
+		    "failed to read tcp_sock->rcv_wup, err=%d", err);
 		goto exit;
 	}
 
 	err = bpf_core_read(&rcv_wnd, sizeof(rcv_wnd), &tp->rcv_wnd);
 	if (err) {
-		bpf_printk("failed to read tcp_sock->rcv_wnd, err=%d", err);
+		dbg(ERR_READ_TCP_rcv_wnd,
+		    "failed to read tcp_sock->rcv_wnd, err=%d", err);
 		goto exit;
 	}
 
@@ -543,7 +596,8 @@ static int current_max_possible_ooo_seq(struct tcp_sock *tp, u32 *seq)
 
 	err = bpf_core_read(&rcv_nxt, sizeof(rcv_nxt), &tp->rcv_nxt);
 	if (err) {
-		bpf_printk("failed reading tcp_sock->rcv_nxt, err=%d", err);
+		dbg(ERR_READ_TCP_rcv_nxt,
+		    "failed reading tcp_sock->rcv_nxt, err=%d", err);
 		goto exit;
 	}
 
@@ -562,9 +616,8 @@ static int current_max_possible_ooo_seq(struct tcp_sock *tp, u32 *seq)
 		 */
 		err = BPF_CORE_READ_INTO(&cb, tp, ooo_last_skb, cb);
 		if (err) {
-			bpf_printk(
-				"failed to read tcp_sock->ooo_last_skb->cb, err=%d",
-				err);
+			dbg(ERR_READ_TCP_last_skb_cb,
+			    "failed to read tcp_sock->ooo_last_skb->cb, err=%d", err);
 			goto exit;
 		}
 
@@ -598,7 +651,8 @@ static bool tcp_read_in_ooo_range(struct tcp_sock *tp,
 
 	err = bpf_core_read(&read_seq, sizeof(read_seq), &tp->copied_seq);
 	if (err) {
-		bpf_printk("failed to read tcp_sock->copied_seq, err=%d", err);
+		dbg(ERR_READ_TCP_cp_seq,
+		    "failed to read tcp_sock->copied_seq, err=%d", err);
 		return true; // Assume we may be in ooo-range
 	}
 
@@ -619,8 +673,8 @@ static bool tcp_read_maybe_holblocked(struct sock *sk)
 
 	err = bpf_core_read(&n_ooopkts, sizeof(n_ooopkts), &tp->rcv_ooopack);
 	if (err) {
-		bpf_printk("failed to read tcp_sock->rcv_ooopack, err=%d\n",
-			   err);
+		dbg(ERR_READ_TCP_rcv_ooopack,
+		    "failed to read tcp_sock->rcv_ooopack, err=%d\n", err);
 		return true; // Assume we may be in ooo-range
 	}
 
@@ -630,8 +684,8 @@ static bool tcp_read_maybe_holblocked(struct sock *sk)
 	ooo_range = bpf_sk_storage_get(&netstack_tcp_ooo_range, sk, NULL,
 				       BPF_SK_STORAGE_GET_F_CREATE);
 	if (!ooo_range) {
-		bpf_printk(
-			"failed getting ooo-range socket storage for tcp socket");
+		dbg(ERR_sk_storage,
+		    "failed getting ooo-range socket storage for tcp socket");
 		return true; // Assume we may be in ooo-range
 	}
 
